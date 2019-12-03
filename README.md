@@ -1,6 +1,6 @@
 # Mbed OS microphone example for the B-L475E-IOT01A development board
 
-This is an example application for the MP34DT01 MEMS microphone on the ST IoT Discovery Kit (also known as the ][DISCO-L475VG-IOT01A](https://os.mbed.com/platforms/ST-Discovery-L475E-IOT01A/) board) for Mbed OS 5. It records two seconds of data from the microphone, creates a WAV file, and outputs the binary file over serial. The port is based on the [FP-AI-SENSING1](https://www.st.com/en/embedded-software/fp-ai-sensing1.html) function pack built by ST. This function pack contains a newer version of the board support package (BSP) for this board that has a microphone driver.
+This is an example application for the MP34DT01 MEMS microphone on the ST IoT Discovery Kit (also known as the [DISCO-L475VG-IOT01A](https://os.mbed.com/platforms/ST-Discovery-L475E-IOT01A/) board) for Mbed OS 5. It records two seconds of data from the microphone, creates a WAV file, and outputs the binary file over serial. The port is based on the [FP-AI-SENSING1](https://www.st.com/en/embedded-software/fp-ai-sensing1.html) function pack built by ST. This function pack contains a newer version of the board support package (BSP) for this board that has a microphone driver.
 
 ## How to build and use this application
 
