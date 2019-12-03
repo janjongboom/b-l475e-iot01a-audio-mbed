@@ -69,6 +69,7 @@
   */
 
 /* Includes ------------------------------------------------------------------*/
+#include <stdio.h>
 #include "stm32l475e_iot01_audio.h"
 
 /** @addtogroup BSP
@@ -461,6 +462,7 @@ int32_t BSP_AUDIO_IN_Record(uint32_t Instance, uint8_t* pData, uint32_t NbrOfByt
 
     if ((Audio_In_Ctx[Instance].Device & AUDIO_IN_DIGITAL_MIC2) == AUDIO_IN_DIGITAL_MIC2)
     {
+      printf("Set up MIC2\n");
       /* Call the Media layer start function for MIC2 channel */
       if(HAL_DFSDM_FilterRegularStart_DMA(&haudio_in_dfsdm_filter[1],
                                            Audio_DigMic2RecBuff,
@@ -472,12 +474,17 @@ int32_t BSP_AUDIO_IN_Record(uint32_t Instance, uint8_t* pData, uint32_t NbrOfByt
 
     if (((Audio_In_Ctx[Instance].Device & AUDIO_IN_DIGITAL_MIC1) == AUDIO_IN_DIGITAL_MIC1) && (status == BSP_ERROR_NONE))
     {
+      // printf("Set up MIC1\n");
       /* Call the Media layer start function for MIC1 channel */
       if(HAL_DFSDM_FilterRegularStart_DMA(&haudio_in_dfsdm_filter[0],
                                            Audio_DigMic1RecBuff,
                                           (Audio_In_Ctx[Instance].Size / (2U * Audio_In_Ctx[Instance].ChannelsNbr))) != HAL_OK)
       {
+        // printf("FAIL HAL_DFSDM_FilterRegularStart_DMA\n");
         status = BSP_ERROR_PERIPH_FAILURE;
+      }
+      else {
+        // printf("OK HAL_DFSDM_FilterRegularStart_DMA\n");
       }
     }
     if (status == BSP_ERROR_NONE)

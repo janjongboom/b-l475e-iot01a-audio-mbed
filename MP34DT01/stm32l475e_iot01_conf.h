@@ -64,8 +64,8 @@ extern "C" {
 #define BUS_SPI3_BAUDRATE                    16000000U /* baud rate of SPIn = 16 Mbps */
 
 /* AUDIO IN internal buffer size in 32-bit words per micro */
-// #define BSP_AUDIO_IN_DEFAULT_BUFFER_SIZE    2048U /* 2048*4 = 8Kbytes */
-#define BSP_AUDIO_IN_DEFAULT_BUFFER_SIZE     PCM_BUFFER_LEN
+#define BSP_AUDIO_IN_DEFAULT_BUFFER_SIZE    2048U /* 2048*4 = 8Kbytes */
+// #define BSP_AUDIO_IN_DEFAULT_BUFFER_SIZE     PCM_BUFFER_LEN
 
 #define CFG_HW_UART1_BAUDRATE                115200
 #define CFG_HW_UART1_WORDLENGTH              UART_WORDLENGTH_8B

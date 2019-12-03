@@ -1,5 +1,4 @@
 {
-    "requires": ["bare-metal"],
     "target_overrides": {
         "*": {
             "platform.stdio-baud-rate" : 115200,
@@ -12,7 +11,7 @@
     },
     "macros": [
         "MBED_HEAP_STATS_ENABLED=1",
-        "MBED_MEM_TRACING_ENABLED",
-        "EI_SENSOR_AQ_STREAM=FILE"
+        "EI_SENSOR_AQ_STREAM=FILE",
+        "USE_HAL_DFSDM_REGISTER_CALLBACKS=1"
     ]
 }
