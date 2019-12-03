@@ -1,0 +1,18 @@
+{
+    "requires": ["bare-metal"],
+    "target_overrides": {
+        "*": {
+            "platform.stdio-baud-rate" : 115200,
+            "platform.stdio-convert-newlines": true
+        },
+        "DISCO_L475VG_IOT01A": {
+            "target.components_add": [ "QSPIF", "WIFI_ISM43362" ],
+            "target.network-default-interface-type": "WIFI"
+        }
+    },
+    "macros": [
+        "MBED_HEAP_STATS_ENABLED=1",
+        "MBED_MEM_TRACING_ENABLED",
+        "EI_SENSOR_AQ_STREAM=FILE"
+    ]
+}
