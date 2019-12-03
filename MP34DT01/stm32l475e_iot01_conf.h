@@ -32,10 +32,13 @@ extern "C" {
 
 /* AUDIO define */
 #define BSP_AUDIO_IN_INSTANCE               0U
+#define AUDIO_INSTANCE                      BSP_AUDIO_IN_INSTANCE
 #define AUDIO_CHANNELS                      1
+#define AUDIO_VOLUME_VALUE                  32
 #define AUDIO_SAMPLING_FREQUENCY            16000
 #define AUDIO_DFSDM_DMAx_MIC1_IRQHandler    DMA1_Channel4_IRQHandler
 #define PCM_BUFFER_LEN                      64U
+#define PCM_AUDIO_IN_SAMPLES                (AUDIO_SAMPLING_FREQUENCY / 1000)
 
 /* COM define */
 #define USE_BSP_COM_FEATURE                  1U

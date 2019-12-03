@@ -1,4 +1,3 @@
-// #include "mbed.h"
 #include "stm32l475e_iot01_audio.h"
 
 HAL_StatusTypeDef MX_DFSDM1_ClockConfig(DFSDM_Channel_HandleTypeDef *hDfsdmChannel, uint32_t SampleRate) {

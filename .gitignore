@@ -1,0 +1,4 @@
+.vscode/
+.mbed
+converter/test.wav
+mbed_settings.py*
