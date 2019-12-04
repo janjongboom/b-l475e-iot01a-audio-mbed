@@ -17,7 +17,7 @@ This example application was tested with the ST B-L475E-IOT01A2 (European versio
 
     ```
     $ cd b-l475e-iot01a-audio-mbed
-    $ mbed compile -t GCC_ARM -m DISCO_L475VG_IOT01A -f
+    $ mbed compile -t GCC_ARM -m DISCO_L475VG_IOT01A --profile=debug -f
     ```
 
 1. Open a serial monitor on baud rate 115200 to see the output.
