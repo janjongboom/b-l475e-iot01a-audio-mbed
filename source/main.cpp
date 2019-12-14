@@ -1,188 +1,138 @@
 #include "mbed.h"
 #include "stm32l475e_iot01_audio.h"
+#include "speechpy.hpp"
+#include "ei_microphone.h"
+#include "model_metadata.h"
+#include "ei_run_classifier.h"
 
-static uint16_t PCM_Buffer[PCM_BUFFER_LEN / 2];
-static BSP_AUDIO_Init_t MicParams;
+using namespace ei;
 
-static DigitalOut led(LED1);
+DigitalOut led(LED1);
 static EventQueue ev_queue;
 
-// Place to store final audio (alloc on the heap), here two seconds...
-static size_t TARGET_AUDIO_BUFFER_NB_SAMPLES = AUDIO_SAMPLING_FREQUENCY * 2;
-static int16_t *TARGET_AUDIO_BUFFER = (int16_t*)calloc(TARGET_AUDIO_BUFFER_NB_SAMPLES, sizeof(int16_t));
-static size_t TARGET_AUDIO_BUFFER_IX = 0;
+static signal_t raw_audio_signal;
+static signal_t preemphasized_audio_signal;
 
-// we skip the first 50 events (100 ms.) to not record the button click
-static size_t SKIP_FIRST_EVENTS = 50;
-static size_t half_transfer_events = 0;
-static size_t transfer_complete_events = 0;
+static void print_matrix(const char *name, matrix_t *matrix);
+
+BlockDevice *bd = BlockDevice::get_default_instance();
+
+/**
+ * Get raw audio signal data
+ */
+static int raw_audio_signal_get_data(size_t offset, size_t length, float *out_ptr) {
+    EIDSP_i16 *temp_buffer = (EIDSP_i16*)malloc(length * sizeof(EIDSP_i16));
+    bd->read(temp_buffer, offset, length * sizeof(EIDSP_i16));
+    int r = numpy::int16_to_float(temp_buffer, out_ptr, length);
+    free(temp_buffer);
+    return r;
+}
+
+/**
+ * Preemphasize the audio signal (lazily)
+ * In the constructor we tell that the source for the preemphasis is the raw audio signal.
+ */
+static class speechpy::processing::preemphasis *preemphasis;
+int preemphasized_audio_signal_get_data(size_t offset, size_t length, float *out_ptr) {
+    int r = preemphasis->get_data(offset, length, out_ptr);
+    return r;
+}
+
+float features_matrix_buffer[49 * 13];
 
 // callback that gets invoked when TARGET_AUDIO_BUFFER is full
-void target_audio_buffer_full() {
-    // pause audio stream
-    int32_t ret = BSP_AUDIO_IN_Pause(AUDIO_INSTANCE);
-    if (ret != BSP_ERROR_NONE) {
-        printf("Error Audio Pause (%d)\n", ret);
-    }
-    else {
-        printf("OK Audio Pause\n");
-    }
+void run_classifier() {
+    Timer t;
+    t.start();
 
-    // create WAV file
-    size_t wavFreq = AUDIO_SAMPLING_FREQUENCY;
-    size_t dataSize = (TARGET_AUDIO_BUFFER_NB_SAMPLES * 2);
-    size_t fileSize = 44 + (TARGET_AUDIO_BUFFER_NB_SAMPLES * 2);
+    raw_audio_signal.total_length = 16000;
+    preemphasized_audio_signal.total_length = 16000;
 
-    uint8_t wav_header[44] = {
-        0x52, 0x49, 0x46, 0x46, // RIFF
-        fileSize & 0xff, (fileSize >> 8) & 0xff, (fileSize >> 16) & 0xff, (fileSize >> 24) & 0xff,
-        0x57, 0x41, 0x56, 0x45, // WAVE
-        0x66, 0x6d, 0x74, 0x20, // fmt
-        0x10, 0x00, 0x00, 0x00, // length of format data
-        0x01, 0x00, // type of format (1=PCM)
-        0x01, 0x00, // number of channels
-        wavFreq & 0xff, (wavFreq >> 8) & 0xff, (wavFreq >> 16) & 0xff, (wavFreq >> 24) & 0xff,
-        0x00, 0x7d, 0x00, 0x00, // 	(Sample Rate * BitsPerSample * Channels) / 8
-        0x02, 0x00, 0x10, 0x00,
-        0x64, 0x61, 0x74, 0x61, // data
-        dataSize & 0xff, (dataSize >> 8) & 0xff, (dataSize >> 16) & 0xff, (dataSize >> 24) & 0xff,
-    };
+    int ret;
 
-    printf("Total complete events: %lu, index is %lu\n", transfer_complete_events, TARGET_AUDIO_BUFFER_IX);
+    matrix_t features_matrix(49, 13, features_matrix_buffer);
 
-    // print both the WAV header and the audio buffer in HEX format to serial
-    // you can use the script in `hex-to-buffer.js` to make a proper WAV file again
-    printf("WAV file:\n");
-    for (size_t ix = 0; ix < 44; ix++) {
-        printf("%02x", wav_header[ix]);
-    }
-
-    uint8_t *buf = (uint8_t*)TARGET_AUDIO_BUFFER;
-    for (size_t ix = 0; ix < TARGET_AUDIO_BUFFER_NB_SAMPLES * 2; ix++) {
-        printf("%02x", buf[ix]);
-    }
-    printf("\n");
-}
-
-/**
-* @brief  Half Transfer user callback, called by BSP functions.
-* @param  None
-* @retval None
-*/
-void BSP_AUDIO_IN_HalfTransfer_CallBack(uint32_t Instance) {
-    half_transfer_events++;
-    if (half_transfer_events < SKIP_FIRST_EVENTS) return;
-
-    uint32_t buffer_size = PCM_BUFFER_LEN / 2; /* Half Transfer */
-    uint32_t nb_samples = buffer_size / sizeof(int16_t); /* Bytes to Length */
-
-    if ((TARGET_AUDIO_BUFFER_IX + nb_samples) > TARGET_AUDIO_BUFFER_NB_SAMPLES) {
+    // and run the MFCC extraction (using 32 rather than 40 filters here to optimize speed on embedded)
+    ret = speechpy::feature::mfcc(&features_matrix, &preemphasized_audio_signal,
+        16000, 0.02f, 0.02f, 13, 32, 512);
+    if (ret != EIDSP_OK) {
+        printf("ERR: MFCC failed (%d)\n", ret);
         return;
     }
 
-    /* Copy first half of PCM_Buffer from Microphones onto Fill_Buffer */
-    memcpy(((uint8_t*)TARGET_AUDIO_BUFFER) + (TARGET_AUDIO_BUFFER_IX * 2), PCM_Buffer, buffer_size);
-    TARGET_AUDIO_BUFFER_IX += nb_samples;
+    t.stop();
 
-    if (TARGET_AUDIO_BUFFER_IX >= TARGET_AUDIO_BUFFER_NB_SAMPLES) {
-        ev_queue.call(&target_audio_buffer_full);
-        return;
-    }
-}
+    printf("mfcc done in %d ms.\n", t.read_ms());
 
-/**
-* @brief  Transfer Complete user callback, called by BSP functions.
-* @param  None
-* @retval None
-*/
-void BSP_AUDIO_IN_TransferComplete_CallBack(uint32_t Instance) {
-    transfer_complete_events++;
-    if (transfer_complete_events < SKIP_FIRST_EVENTS) return;
+    t.reset();
+    t.start();
 
-    uint32_t buffer_size = PCM_BUFFER_LEN / 2; /* Half Transfer */
-    uint32_t nb_samples = buffer_size / sizeof(int16_t); /* Bytes to Length */
-
-    if ((TARGET_AUDIO_BUFFER_IX + nb_samples) > TARGET_AUDIO_BUFFER_NB_SAMPLES) {
+    // cepstral mean and variance normalization
+    ret = speechpy::processing::cmvnw(&features_matrix, 101, true);
+    if (ret != EIDSP_OK) {
+        printf("ERR: cmvnw failed (%d)\n", ret);
         return;
     }
 
-    /* Copy second half of PCM_Buffer from Microphones onto Fill_Buffer */
-    memcpy(((uint8_t*)TARGET_AUDIO_BUFFER) + (TARGET_AUDIO_BUFFER_IX * 2),
-        ((uint8_t*)PCM_Buffer) + (nb_samples * 2), buffer_size);
-    TARGET_AUDIO_BUFFER_IX += nb_samples;
+    t.stop();
 
-    if (TARGET_AUDIO_BUFFER_IX >= TARGET_AUDIO_BUFFER_NB_SAMPLES) {
-        ev_queue.call(&target_audio_buffer_full);
-        return;
+    printf("cmvnw done in %d ms.\n", t.read_ms());
+
+    Timer classify_timer;
+    classify_timer.start();
+
+    // print MFCC features from the signal
+    print_matrix("mfcc_features", &features_matrix);
+
+    ei_impulse_result_t result;
+
+    int r = run_classifier(features_matrix.buffer, features_matrix.cols * features_matrix.rows, &result);
+    printf("Classifier done %d\n", r);
+
+    // classify_timer.stop();
+    // printf("classifier took %d ms.\n", classify_timer.read_ms());
+
+    printf("Classification result:\n");
+    for (size_t ix = 0; ix < INFERENCING_LABEL_COUNT; ix++) {
+        printf("    %s: %.5f\n", result.classification[ix].label, result.classification[ix].value);
     }
-}
-
-/**
-  * @brief  Manages the BSP audio in error event.
-  * @param  Instance Audio in instance.
-  * @retval None.
-  */
-void BSP_AUDIO_IN_Error_CallBack(uint32_t Instance) {
-    printf("BSP_AUDIO_IN_Error_CallBack\n");
-}
-
-void print_stats() {
-    printf("Half %lu, Complete %lu, IX %lu\n", half_transfer_events, transfer_complete_events,
-        TARGET_AUDIO_BUFFER_IX);
 }
 
 void start_recording() {
-    int32_t ret;
-    uint32_t state;
+    ei_microphone_sample_start();
 
-    ret = BSP_AUDIO_IN_GetState(AUDIO_INSTANCE, &state);
-    if (ret != BSP_ERROR_NONE) {
-        printf("Cannot start recording: Error getting audio state (%d)\n", ret);
-        return;
-    }
-    if (state == AUDIO_IN_STATE_RECORDING) {
-        printf("Cannot start recording: Already recording\n");
-        return;
-    }
+    printf("Done recording\n");
 
-    // reset audio buffer location
-    TARGET_AUDIO_BUFFER_IX = 0;
-    transfer_complete_events = 0;
-    half_transfer_events = 0;
-
-    ret = BSP_AUDIO_IN_Record(AUDIO_INSTANCE, (uint8_t *) PCM_Buffer, PCM_BUFFER_LEN);
-    if (ret != BSP_ERROR_NONE) {
-        printf("Error Audio Record (%ld)\n", ret);
-        return;
-    }
-    else {
-        printf("OK Audio Record\n");
-    }
+    run_classifier();
 }
 
+
 int main() {
-    printf("Hello from the B-L475E-IOT01A microphone demo\n");
+    printf("Hello from the B-L475E-IOT01A microphone demo, have BD? %p\n", bd);
 
-    if (!TARGET_AUDIO_BUFFER) {
-        printf("Failed to allocate TARGET_AUDIO_BUFFER buffer\n");
-        return 0;
-    }
+    uint32_t frequency = 16000;
+    size_t signal_length = 16000;
 
-    // set up the microphone
-    MicParams.BitsPerSample = 16;
-    MicParams.ChannelsNbr = AUDIO_CHANNELS;
-    MicParams.Device = AUDIO_IN_DIGITAL_MIC1;
-    MicParams.SampleRate = AUDIO_SAMPLING_FREQUENCY;
-    MicParams.Volume = 32;
+    printf("BD init returned %d\n", bd->init());
 
-    int32_t ret = BSP_AUDIO_IN_Init(AUDIO_INSTANCE, &MicParams);
+    // create a structure to retrieve data from the signal
+    raw_audio_signal.total_length = signal_length;
+    raw_audio_signal.get_data = &raw_audio_signal_get_data;
 
-    if (ret != BSP_ERROR_NONE) {
-        printf("Error Audio Init (%ld)\r\n", ret);
-        return 1;
-    } else {
-        printf("OK Audio Init\t(Audio Freq=%ld)\r\n", AUDIO_SAMPLING_FREQUENCY);
-    }
+    // preemphasis class to preprocess the audio...
+    preemphasis = new class speechpy::processing::preemphasis(&raw_audio_signal, 1, 0.98f);
+
+    preemphasized_audio_signal.total_length = raw_audio_signal.total_length;
+    preemphasized_audio_signal.get_data = &preemphasized_audio_signal_get_data;
+
+    // calculate the size of the MFCC matrix
+    matrix_size_t out_matrix_size =
+        speechpy::feature::calculate_mfcc_buffer_size(signal_length, frequency, 0.02f, 0.02f, 13);
+    printf("out_matrix_size is %hu x %hu\n", out_matrix_size.rows, out_matrix_size.cols);
+
+    // features_matrix = new matrix_t(out_matrix_size.rows, out_matrix_size.cols);
+
+    ei_microphone_init();
 
     printf("Press the BLUE button to record a message\n");
 
@@ -191,4 +141,23 @@ int main() {
     btn.fall(ev_queue.event(&start_recording));
 
     ev_queue.dispatch_forever();
+}
+
+static void print_matrix(const char *name, matrix_t *matrix) {
+    printf("%s: [\n", name);
+    for (uint16_t rx = 0; rx < matrix->rows; rx++) {
+        printf("    [ ");
+        for (uint16_t cx = 0; cx < matrix->cols; cx++) {
+            printf("%f ", matrix->buffer[rx * matrix->cols + cx]);
+            if (cx != matrix->cols - 1) {
+                printf(", ");
+            }
+        }
+        printf("] ");
+        if (rx != matrix->rows - 1) {
+            printf(", ");
+        }
+        printf("\n");
+    }
+    printf("]\n");
 }
